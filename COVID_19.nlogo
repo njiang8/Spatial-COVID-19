@@ -11,7 +11,8 @@ globals
     chance-reproduce     ;; the probability of a turtle generating an offspring each tick
     chance-recover       ;; the probability of recovery at each tick
     carrying-capacity    ;; the number of turtles that can be in the world at one time
-    immunity-duration ]  ;; how many weeks immunity lasts
+    immunity-duration    ;; how many weeks immunity lasts
+    number-dead ]        ;; how many turtles die
 
 ;; The setup is divided into four procedures
 to setup
@@ -31,8 +32,6 @@ to setup-turtles
       set age random lifespan
       set sick-time 0
       set remaining-immunity 0
-      if age < 10 * 52 * 7 [set color blue]
-      if age > 60 * 52 * 7 [set color yellow]
       set size .7 ;; easier to see
       get-healthy ]
   ask n-of 1 turtles
@@ -62,11 +61,11 @@ to setup-constants
   set lifespan 80 * 52 * 7     ;; 80 times 52 weeks times 7 days = 50 years = 2600 weeks old = 18200 days
   set carrying-capacity 1000
   set chance-reproduce 0.34 ;; birth rate per 1000 people per week
-  set immunity-duration 52 * 7
-  if Weather = "Hot-Humid" [set chance-recover .98]
-  if Weather = "Hot-Dry" [set chance-recover .96]
-  if Weather = "Cold-Dry" [set chance-recover .95]
-  if Weather = "Cold-Humid" [set chance-recover .94]
+  set immunity-duration 4 * 7 ;; 4 weeks for immunity duration
+  if Weather = "Hot-Humid" [set infectiousness  .9 * infectiousness]
+  if Weather = "Hot-Dry" [set infectiousness  .95 * infectiousness]
+  if Weather = "Cold-Dry" [set infectiousness  .97 * infectiousness]
+  if Weather = "Cold-Humid" [set infectiousness infectiousness]
 end
 
 to go
@@ -79,6 +78,7 @@ to go
   update-global-variables
   update-display
   tick
+  if ticks = 100 [stop]
 end
 
 to update-global-variables
@@ -91,7 +91,10 @@ to update-display
   ask turtles
     [ if shape != turtle-shape [ set shape turtle-shape ]
       set label ifelse-value show-age? [ floor (age / 364) ] [ "" ]
-      set color ifelse-value sick? [ red ] [ ifelse-value immune? [ grey ] [ green ] ] ]
+      set color ifelse-value sick? [ red ] [ ifelse-value immune? [ grey ] [ green ] ]
+      if age < 10 * 52 * 7 [set color blue]
+      if age > 60 * 52 * 7 [set color yellow]
+    ]
   stop-inspecting-dead-agents
   if watch-a-person? and subject = nobody
     [ watch one-of turtles with [ not hidden? ]
@@ -129,7 +132,7 @@ end
 to move ;; turtle procedure
   rt random 100
   lt random 100
-  fd 1
+  fd movement
 end
 
 ;; If a turtle is sick, it infects other turtles on the same patch.
@@ -147,10 +150,13 @@ end
 ;; Once the turtle has been sick long enough, it
 ;; either recovers (and becomes immune) or it dies.
 to recover-or-die ;; turtle procedure
+  if age > 60 * 52 * 7 [ set chance-recover .93]
+  if age < 60 * 52 * 7 [ set chance-recover .97]
   if sick-time > duration                        ;; If the turtle has survived past the virus' duration, then
     [ ifelse random-float 100 < chance-recover   ;; either recover or die
       [ become-immune ]
-      [ die ] ]
+      [ set number-dead number-dead + 1
+        die ]]
 end
 
 ;; If there are less turtles than the carrying-capacity
@@ -171,6 +177,7 @@ end
 to startup
   setup-constants ;; so that carrying-capacity can be used as upper bound of number-people slider
 end
+
 
 
 ; Copyright 1998 Uri Wilensky.
@@ -205,14 +212,14 @@ ticks
 
 SLIDER
 45
-125
+120
 239
-158
+153
 duration
 duration
 2.0
-4.0
-2.0
+8.0
+6.0
 1.0
 1
 weeks
@@ -227,8 +234,8 @@ infectiousness
 infectiousness
 140.0
 480.0
-480.0
-1.0
+270.89959986
+100.0
 1
 %
 HORIZONTAL
@@ -287,6 +294,7 @@ PENS
 "immune" 1.0 0 -7500403 true "" "plot count turtles with [ immune? ]"
 "healthy" 1.0 0 -10899396 true "" "plot count turtles with [ not sick? and not immune? ]"
 "total" 1.0 0 -13345367 true "" "plot count turtles"
+"dead" 1.0 0 -955883 true "" "plot number-dead"
 
 SLIDER
 45
@@ -297,17 +305,17 @@ number-people
 number-people
 10
 carrying-capacity
-1000.0
+801.0
 1
 1
 NIL
 HORIZONTAL
 
 MONITOR
-38
-323
-113
-368
+5
+320
+80
+365
 NIL
 %infected
 1
@@ -315,10 +323,10 @@ NIL
 11
 
 MONITOR
-115
-323
-189
-368
+80
+320
+154
+365
 NIL
 %immune
 1
@@ -326,10 +334,10 @@ NIL
 11
 
 MONITOR
-191
-324
-263
-369
+215
+320
+287
+365
 years
 ticks / (52 * 7)
 1
@@ -338,9 +346,9 @@ ticks / (52 * 7)
 
 CHOOSER
 70
-195
+200
 220
-240
+245
 turtle-shape
 turtle-shape
 "person" "circle"
@@ -369,14 +377,40 @@ watch-a-person?
 -1000
 
 CHOOSER
-825
-15
-963
-60
+75
+155
+213
+200
 Weather
 Weather
 "Hot-Humid" "Hot-Dry" "Cold-Humid" "Cold-Dry"
-3
+0
+
+SLIDER
+455
+515
+627
+548
+movement
+movement
+0.25
+1
+0.25
+.25
+1
+NIL
+HORIZONTAL
+
+MONITOR
+155
+320
+212
+365
+Deaths
+number-dead
+2
+1
+11
 
 @#$#@#$#@
 ## ACKNOWLEDGMENT
@@ -798,6 +832,56 @@ NetLogo 6.0.4
 @#$#@#$#@
 @#$#@#$#@
 @#$#@#$#@
+<experiments>
+  <experiment name="experiment" repetitions="10" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <metric>count turtles with [color = red]</metric>
+    <metric>count turtles with [color = yellow]</metric>
+    <metric>count turtles with [color = blue]</metric>
+    <metric>count turtles with [color = gray]</metric>
+    <metric>number-dead</metric>
+    <metric>count turtles with [age &gt; 60 and color = gray]</metric>
+    <metric>count turtles with [age &gt; 60 and color = red]</metric>
+    <metric>count turtles with [age &lt; 60 and color = gray]</metric>
+    <metric>count turtles with [age &lt; 60 and color = red]</metric>
+    <enumeratedValueSet variable="duration">
+      <value value="2"/>
+      <value value="3"/>
+      <value value="4"/>
+      <value value="5"/>
+      <value value="6"/>
+      <value value="7"/>
+      <value value="8"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="movement">
+      <value value="0.25"/>
+      <value value="0.5"/>
+      <value value="0.75"/>
+      <value value="5"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="Weather">
+      <value value="&quot;Hot-Humid&quot;"/>
+      <value value="&quot;Hot-Dry&quot;"/>
+      <value value="&quot;Cold-Humid&quot;"/>
+      <value value="&quot;Cold-Dry&quot;"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="infectiousness">
+      <value value="140"/>
+      <value value="200"/>
+      <value value="300"/>
+      <value value="400"/>
+      <value value="480"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="number-people">
+      <value value="100"/>
+      <value value="250"/>
+      <value value="500"/>
+      <value value="750"/>
+      <value value="1000"/>
+    </enumeratedValueSet>
+  </experiment>
+</experiments>
 @#$#@#$#@
 @#$#@#$#@
 default
