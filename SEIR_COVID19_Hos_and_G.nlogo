@@ -6,24 +6,34 @@ globals[
   exposeds       ;poeple who carry the virus and not infected
   infecteds_     ;the number of infected people
   recovereds_    ;the number of recovered people
-  maskeds_       ;the number of people wear masks
+  death_         ;the number of people died
   islolateds
   width          ;;the width of the world
-  N              ;;when people wear mask they may have lower probablity to get infected
+  ;incubation
+  HOS
+  full?
+  l
 ]
 
 turtles-own[
+  age       ;age of the agent
   status    ;0 for susceptible, 1 for exposed, 2 for infected, 3 for recovered
   isolation ;1 for isolate
+  incubation
   days      ;expose and insolation days
   masked    ;when wear mask set 1
   flag      ;to check if being asked or not, 1 is aksed by infected, 2 is asked by exposed
   x         ;home X coord
   y         ;home Y coord
+  spread?   ;Ture means agent can spread, false means can not spread
+  engery    ;Controls agnets go to Groceay
 ]
 
 patches-own[
   isolation_area
+  ;full?
+  hos-capacity
+  market-capacity
 ]
 
 ;******************;
@@ -35,11 +45,8 @@ to setup
 
   ;resize-world 0 width 0 width
   create_pop
+  create-environment
 
-  if Mask = True[
-    ask turtles [set masked  1]
-    change-shape
-  ]
 
   ;;one agent gets infected
   ask n-of 1 turtles
@@ -47,6 +54,7 @@ to setup
     set status 2 ; set infected
     set color red
     set days 0
+    set spread? true
   ]
 
   set susceptibles_ count turtles with [status = 0]
@@ -58,182 +66,295 @@ to create_pop
   crt population
   [
     set status 0
-    move-to one-of patches
-    set shape "person"
     set color blue
+    set shape "person"
+
+    set spread? true
+    ;set in-hos? false
+
+    move-to one-of patches
     set x pxcor
     set y pycor
+
+    move-to one-of patches
+    set incubation random-normal 5 3
+
+  ]
+
+  ask turtles [
+    if incubation < 0 [set incubation 1]
+    ;show incubation
   ]
 
   ;;set the world size equal to the number of agents
   set width (sqrt population) - 1
 end
 
+;2.2 Create environment
+to create-environment
+  ;hosptial
+  ask patches with [pxcor = 49 and pycor = 0]
+  [
+    set pcolor pink
+    set full? false
+    set hos-capacity round population * 3 / 1000
+    set HOS round hos-capacity
+    show round hos-capacity
+    ;no body here when initialize
+    ask turtles-here [die]
+  ]
+end
+
 
 ;******************;
 ;3 Simulation      ;
 ;******************;
+to regular-move
+  ask turtles with [spread? != false] [rt random 360 fd 1]
+  spread-1
+  get-infected
+end
+
+
 to go
-  ;;stop if no agent is infected
+  ;;Stop, if no agent is infected
   if count turtles with [status = 2] = 0 [stop]
 
-  ;;S 1, move freely
-  if (Stay = False) and (Isolate = False) and (Mask = False) or (ticks < 30)[
-    ask turtles [rt random 360 fd 1]
-    regular
+  ;Limitation on Hospital
+  if Limit = True[
+    ;check if the hospital is full
+    check-hospital
+
+    ifelse Stay = True
+    ;;S2, Self quarantine with Limitaion on Hospital
+    [
+      ifelse ticks < 15
+      ;after a while people start stays at home
+      [
+        regular-move
+        ifelse full? = true [regular-move] [go-hospital]
+      ]
+      ;else starts staying at home and no one can spread the virus
+      [
+        ask turtles with [isolation != 1][move-to patch x y set spread? false get-infected]
+        ifelse full? = true
+        [ask turtles with [isolation != 1][move-to patch x y set spread? false]]
+        [go-hospital]
+      ]
+      recover-hos
+      recover-reg
+    ]
+
+    ;;S 1, move freely with Linitation on Hospital (works)
+    [
+      regular-move
+      ifelse full? = true [regular-move] [go-hospital]
+    ]
+
+    recover-reg
+    recover-hos
   ]
 
-  ;;S 2, everybody stay at home, works ok
-  if (Stay = True) and (Isolate = False) and (Mask = False) and (ticks > 30)[
-    stay-home
-    get-infected
-    recover
+  ;Not Hospital Limitaions
+  if Limit = False[
+    ifelse Stay = False
+    ;;S3 Partial Free World, Only infectious go to hospital (works)
+    [
+      ;move
+      ask turtles with [spread? != false] [rt random 360 fd 1]
+      ;1 Spread the Disease
+      spread-1
+      ;2, Get Infected by the Disease
+      get-infected
+      ;3,go to hospital, because we don't know or understan this  disease
+      if ticks > 5 [
+        go-hospital
+      ]
+      ;3. Recover of the Disease
+      recover-hos
+    ]
+    ;;S4, Self Quarantine without Limitaion on Hospital (works)
+    [
+      ifelse ticks > 15[
+        ;s stay at home
+        ask turtles with [status = 0][move-to patch x y set spread? false]
+        ;exposed stay at home
+        ask turtles with [status = 1][move-to patch x y set spread? false]
+        go-hospital
+        get-infected
+        recover-hos
+      ]
+      ;else
+      [
+        ask turtles [rt random 360 fd 1]
+        spread-1
+        get-infected
+      ]
+    ]
   ]
-
-  ;S 3, Infected people get isolation treatment, rest of people move freely
-  if (Stay = false) and (Isolate = True) and (Mask = False) and (ticks > 30)[
-    ;set isolation treatment area
-    ask patches with [pxcor = 49 and pycor = 0]  [set pcolor pink]
-
-    ;let people who get infected go to isolation hospatial
-    isolation_treatment
-    ;rest of population move freely
-    ask turtles with [isolation != 1][rt random 360 fd 1]
-    spread-2
-    get-infected
-    recover
-  ]
-
-  ;S4 Infected People fet isolated treatment and rest of the people stays at home
-  if (Stay = True) and (Isolate = True) and (Mask = False) and (ticks > 30)[
-    ;set isolation treatment area
-    ask patches with [pxcor = 49 and pycor = 0]  [set pcolor pink]
-    ;let people who get infected go to isolation hospatial, no one moves around
-    isolation_treatment
-    stay-home2
-    get-infected
-    recover-iso
-  ]
-
 
   ;;update the number of each type of agents
   set susceptibles_  count turtles with [status = 0]
   set exposeds       count turtles with [status = 1]
   set infecteds_     count turtles with [status = 2]
   set recovereds_    count turtles with [status = 3]
-  set islolateds     count turtles with [status = 4]
-  set maskeds_       count turtles with [status = 5]
+  ;set islolateds     count turtles with [isolation = 1]
+  set death_         population - count turtles
 
-  update-days ;this function is to track how long te disease stay in human's body
-
-
+  update-days ;this function is to track how long the disease stay in human's body
   change-color
-
   abm-do-plot
   tick
-
-end
-
-;3.0 Rrgualr
-to regular
-  ;1 Spread the Disease
-  spread-1
-  ;2, Get Infected by the Disease
-  get-infected
-  ;3. Recover of the Disease
-  recover
 end
 
 
-
-;3.1 Disease Spread Regular Expose and Infected Spread
+;3.1.1 Disease Spread Regular Expose and Infected Spread
 to spread-1
-    ;find people near to the infected people
-    ask turtles with [status = 2][
-      ask turtles in-radius 3[set flag 1]
-    ]
-    ;one person can lead 3 people to change status to 1
-    ask n-of 3 turtles with [flag = 1][
-      if (status = 0) or (status = 3)
-      [set status 1]
-    ]
-    ;expose people spread disease
-    if count turtles with [status = 1] > 0
+  ;Infected spread
+  ask turtles with [status = 2][
+    if spread? = true
     [
-      ask turtles with [status = 1][
-        ask turtles in-radius 3[set flag 2]
-      ]
-      ask n-of 3 turtles with [flag = 2][
-        if (status = 0) or (status = 3)
-        [set status 1]
-      ]
+      ask turtles in-radius 3 [set flag 1]
     ]
-end
-
-;3.1.2 Disease Spread Explosed can spread Only
-to spread-2
-  if count turtles with [status = 1] > 0
+  ]
+  ;exposed spread
+  ask turtles with [status = 1][
+    if spread? = true
     [
-      ask turtles with [status = 1][
-        ask turtles in-radius 3[set flag 2]
-      ]
-      ask n-of 3 turtles with [flag = 2][
-        if (status = 0) or (status = 3)
-        [set status 1]
-      ]
+      ask turtles in-radius 3 [set flag 1]
+    ]
+  ]
+  ;Change stauts
+  ;one person can lead 3 people to change status to 1
+  ask n-of 3 turtles with [flag = 1][
+    if (status = 0) or (status = 3)[set status 1 set days 0]
   ]
 end
 
-
 ;3.2 People Get infected
+;;Status change from 1 to 2
 to get-infected
   ;only people who are exposed can get infected
   ask turtles with [status = 1][
-    ifelse days <= 14 ;icubation days
-    [if random-float 1 < (InfectionRate * ( width * width )* dt)[set status 2 set days 0]]
-    ;else
-    [set status 0 set days 0]
+    if days > incubation ;icubation days
+    [set flag 0 set status 2 set days 0 set spread? true]
+  ]
+end
+
+;3.3 Go to hosptital
+to go-hospital
+  ;No Limitation
+  ifelse Limit = false[
+    ask turtles with [status = 2 and spread? = true][
+      move-to patch 49 0
+      set spread? false
+      set isolation 1
+      set days 0
+    ]
+  ]
+  ;With Limit
+  [
+    ;how many beds left in hospital
+    ;set l HOS - count turtles-on patch 49 0
+    set l HOS - count turtles with [isolation = 1]
+    print l
+    ;infectious and spreadable agents
+    let temp1 count turtles with [status = 2 and spread? = true]
+    ;show temp1
+    ;1
+    if temp1 = 1
+    [
+      ask turtles with [status = 2 and spread? = true][
+        move-to patch 49 0
+        set spread? false
+        set isolation 1
+        set days 0
+      ]
+    ]
+    ;2
+    if temp1 = 0 [show 0]
+    ;3
+    if temp1 > 2
+    [
+      ask n-of l turtles with [status = 2 and spread? = true][
+        move-to patch 49 0
+        set spread? false
+        set isolation 1
+        set days 0
+      ]
+    ]
+
+    if Stay = True [
+      set l HOS - count turtles with [isolation = 1]
+      print l
+      let temp2 count turtles with [status = 2 and isolation = 0]
+
+      ;1, no infectious
+      if temp2 = 0 [show 0]
+      ;2, only on ifectiou, only move that one to hospital
+      if temp2 = 1
+      [
+        ask turtles with [status = 2][
+          move-to patch 49 0
+          set spread? false
+          set isolation 1
+          set days 0
+        ]
+      ]
+      ;3 if more than one infectious, see how many beds left in hospital and move that amount of agent to hospital
+      if temp2 > 2
+      [
+        ask n-of l turtles with [status = 2 ][
+          move-to patch 49 0
+          set spread? false
+          set isolation 1
+          set days 0
+        ]
+      ]
+    ]
+  ]
+
+end
+
+;3.3.1 Update Hospital, Check if the hospital is full
+to check-hospital
+  ask patches with [pcolor = pink][
+    let here count turtles-here
+    ifelse here >= HOS
+    [set full? true print full?]
+    [set full? false print full?]
   ]
 end
 
 
-;3.3.1 People Recover
-to recover
-    ask turtles with [status = 2][
-      if random-float 1 < RecoveryRate * dt [set status 3 set days 0]
-    ]
-end
-
-;3.3.2 People Recover when has isolation
-to recover-iso
-    ask turtles with [isolation = 1][
-      if days > 12[
-        move-to patch 0 0; move back to home
+;3.4.1 People Recover in Hospital
+to recover-hos
+  ;hospital recover
+  ask turtles with [isolation = 1][
+    ifelse random-float 0.1 < 0.001 * dt
+      ;die
+      ;[ht set status 4]
+      [die]
+      ;else
+      [if days > 14[
+        move-to patch x y; move back to home
+        set spread? true
         set isolation 0
         set status 3
-        set days 0
-      ]
-    ]
+        set days 0]]
+  ]
 end
 
-;3.4 People stay at home
-;3.4.1 universial stay home
-to stay-home
-  ask turtles [move-to patch  x y]
-end
-
-;3.4.2 isoalted stay home
-to stay-home2
-  ask turtles with [status != 2] [move-to patch x y]
-end
-
-
-;3.5 Isolation Treatment
-to isolation_treatment
-  ask turtles with [status = 2][
-    move-to patch 49 0
-    set isolation 1
-    ;set days 0
+;3.4.2 People Recover regular
+to recover-reg
+  ask turtles with [isolation != 1 and status = 2]
+  [
+    ifelse random-float 0.1 < 0.05 * dt
+    ;die
+    ;[ht set status 4]
+    [die]
+    ;else
+    [if random-float 1 < RecoveryRate * dt [set status 3 set days 0]]
   ]
 end
 
@@ -265,21 +386,22 @@ to change-color
   ]
 end
 
-;4.3 change the shape when people where mask
-to change-shape
-   ask turtles[
-    if masked = 1 [set shape "circle"]
-  ]
+;4.3 update-global vartable
+to update-global
+
+  set death_ population - count turtles
 end
+
+
 
 ;4.4 plot
 to abm-do-plot
-;;plot the numbers of susceptibles, infecteds, recovereds over time
+  ;;plot the numbers of susceptibles, infecteds, recovereds over time
 
-;  if plot-pen-exists? "susceptibles" [
-;    set-current-plot-pen "susceptibles"
-;    plotxy ticks susceptibles_
-;  ]
+  ;  if plot-pen-exists? "susceptibles" [
+  ;    set-current-plot-pen "susceptibles"
+  ;    plotxy ticks susceptibles_
+  ;  ]
 
   if plot-pen-exists? "exposeds" [
     set-current-plot-pen "exposeds"
@@ -294,6 +416,12 @@ to abm-do-plot
     set-current-plot-pen "recovereds"
     plotxy ticks recovereds_
   ]
+
+  if plot-pen-exists? "deaths" [
+    set-current-plot-pen "deaths"
+    plotxy ticks death_
+  ]
+
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
@@ -358,30 +486,15 @@ NIL
 1
 
 SLIDER
-6
-258
-178
-291
-InfectionRate
-InfectionRate
-0
-0.1
-0.018
-.001
-1
-NIL
-HORIZONTAL
-
-SLIDER
-6
-295
-178
-328
+15
+249
+188
+282
 RecoveryRate
 RecoveryRate
 0
 1
-0.25
+0.2
 0.01
 1
 NIL
@@ -407,6 +520,7 @@ PENS
 "recovereds" 1.0 0 -13840069 true "" ""
 "susceptibles" 1.0 0 -13345367 true "" ""
 "exposeds" 1.0 0 -1184463 true "" ""
+"deaths" 1.0 0 -16777216 true "" ""
 
 BUTTON
 83
@@ -426,10 +540,10 @@ NIL
 1
 
 SLIDER
-6
-331
-178
-364
+14
+288
+186
+321
 dt
 dt
 0
@@ -441,10 +555,10 @@ NIL
 HORIZONTAL
 
 SLIDER
-6
-368
-178
-401
+15
+209
+187
+242
 Population
 Population
 0
@@ -455,33 +569,11 @@ Population
 NIL
 HORIZONTAL
 
-SWITCH
-12
-100
-102
-133
-Isolate
-Isolate
-1
-1
--1000
-
-SWITCH
-13
-177
-103
-210
-Mask
-Mask
-0
-1
--1000
-
 MONITOR
-6
-408
-63
-453
+930
+318
+987
+363
 Width
 width
 17
@@ -489,45 +581,101 @@ width
 11
 
 SWITCH
-12
-138
-102
-171
+16
+156
+106
+189
 Stay
 Stay
-1
+0
 1
 -1000
 
 TEXTBOX
-105
-110
-248
-128
-With Isolation Treatment\n
-11
-0.0
-1
-
-TEXTBOX
-105
-146
-255
-164
-Stay at Home or Not\n
-11
-0.0
-1
-
-TEXTBOX
-109
-186
+116
+118
 259
-204
-Wear Mask or Not\n
+146
+Go to Hospital With Limitation or Not
 11
 0.0
 1
+
+TEXTBOX
+117
+166
+243
+184
+Self-Quarantine\n
+11
+0.0
+1
+
+MONITOR
+701
+316
+780
+361
+Population
+count turtles
+17
+1
+11
+
+MONITOR
+792
+389
+911
+434
+Agents in Hospital
+count turtles with [status = 2 and isolation = 1]
+17
+1
+11
+
+MONITOR
+787
+316
+857
+361
+Infecteds
+infecteds_
+17
+1
+11
+
+SWITCH
+15
+114
+105
+147
+Limit
+Limit
+0
+1
+-1000
+
+MONITOR
+866
+316
+923
+361
+Death
+death_
+17
+1
+11
+
+MONITOR
+703
+389
+789
+434
+Hospital Full?
+full?
+17
+1
+11
 
 @#$#@#$#@
 ## WHAT IS IT?
@@ -536,7 +684,7 @@ This is an agent-based model (ABM) version of the SIR model.
 
 ## HOW IT WORKS
 
-At the beginning, one agent will get infected. During each iteration (dt), an infected agent may infect agents on the same cell. Here, I would like to map the probability of getting infected to the one in the SD model. Therefore, as in the SD model, the infection rate is the infection rate on the entire population. In this ABM, the probability to get infected is equal to the infection rate divided by the probability to be in the same cell, times the change in time. Each infected agent has a probability to recover in each time period, which equals to the recovery rate times the change in time. The equations can be expressed as:
+At the beginning, one agent will get infected. During each iteration (dt), an infected agent may infect 3 agents in r of 3. Here, I would like to map the probability of getting infected to the one in the SD model. Therefore, as in the SD model, the infection rate is the infection rate on the entire population. In this ABM, the probability to get infected is equal to the infection rate divided by the probability to be in the same cell, times the change in time. Each infected agent has a probability to recover in each time period, which equals to the recovery rate times the change in time. The equations can be expressed as:
 
 probability that an agent will get infected = infection rate / probability to be in the same cell * change in time
 
@@ -874,24 +1022,30 @@ NetLogo 6.0.4
 @#$#@#$#@
 @#$#@#$#@
 <experiments>
-  <experiment name="experiment" repetitions="10" runMetricsEveryStep="true">
+  <experiment name="S1" repetitions="10" runMetricsEveryStep="true">
     <setup>setup</setup>
     <go>go</go>
+    <timeLimit steps="500"/>
     <exitCondition>count turtles with [status = 2] = 0</exitCondition>
     <metric>susceptibles_</metric>
+    <metric>exposeds</metric>
     <metric>infecteds_</metric>
     <metric>recovereds_</metric>
+    <metric>death_</metric>
     <enumeratedValueSet variable="RecoveryRate">
-      <value value="0.5"/>
+      <value value="0.2"/>
     </enumeratedValueSet>
-    <enumeratedValueSet variable="InfectionRate">
-      <value value="0.002"/>
+    <enumeratedValueSet variable="Population">
+      <value value="1500"/>
     </enumeratedValueSet>
-    <enumeratedValueSet variable="susceptibles">
-      <value value="&quot;2500&quot;"/>
+    <enumeratedValueSet variable="Limit">
+      <value value="true"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="Stay">
+      <value value="false"/>
     </enumeratedValueSet>
     <enumeratedValueSet variable="dt">
-      <value value="0.001"/>
+      <value value="0.01"/>
     </enumeratedValueSet>
   </experiment>
 </experiments>
